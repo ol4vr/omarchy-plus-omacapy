@@ -2,9 +2,13 @@
 
 ![OmaCapy](preview.png)
 
-A bar companion for [Omarchy](https://omarchy.org/) — same shell, same theme, nothing extra to install.
+The Omarchy+ owned edition of the OmaCapy bar companion — same shell, same
+theme, nothing extra to install.
 
 Pet it. Feed it oranges. Soak it. Collect omakase one-liners. When the machine fries, the rodent looks fried too.
+
+Based on [Esegnorelli/omarchy-omacapy](https://github.com/Esegnorelli/omarchy-omacapy)
+under the MIT license.
 
 Computers can be useful **and** fun.
 
@@ -17,7 +21,9 @@ Computers can be useful **and** fun.
 | **Soak** | Zen up. Send it to the river. |
 | **Wisdom** | A one-liner. No refunds. |
 
-Happiness, snacks, and zen fade slowly on their own. Night restores zen. High CPU load (from `/proc/loadavg`) cooks it until you soak.
+Happiness, snacks, and zen fade slowly on their own. Night restores zen. High
+system load cooks it until you soak. Load is normalized by the number of online
+logical CPUs, so behavior remains consistent across small systems and Hugin.
 
 ## Moods
 
@@ -45,14 +51,14 @@ In the lounge:
 
 - **Pet / Orange / Soak / Wisdom** each leave their own mark — mood, a short toast, or a quote card
 - **p / o / s / w** (or **1–4**) fire those actions from the keyboard
-- **Side** moves the badge and panel to the left, center, or right of the bar at any time
 
 State lives in `~/.local/state/omarchy/omacapy.json`. Nothing leaves the machine.
+Bar placement is owned by the central Omarchy+ plugin manifest.
 
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/Esegnorelli/omarchy-omacapy.git --enable
+omarchy plugin add https://github.com/ol4vr/omarchy-plus-omacapy.git --enable
 ```
 
 Local checkout:
@@ -65,14 +71,14 @@ omarchy plugin add "$PWD" --enable
 Optional placement:
 
 ```bash
-omarchy bar move esegnorelli.omacapy --section center
+omarchy bar move io.github.ol4vr.omacapy --section center
 ```
 
 ## Remove
 
 ```bash
-omarchy plugin disable esegnorelli.omacapy
-omarchy plugin remove esegnorelli.omacapy --yes
+omarchy plugin disable io.github.ol4vr.omacapy
+omarchy plugin remove io.github.ol4vr.omacapy --yes
 # optional: rm ~/.local/state/omarchy/omacapy.json
 ```
 
@@ -80,6 +86,9 @@ omarchy plugin remove esegnorelli.omacapy --yes
 
 - Omarchy Quattro shell
 - Nothing else. No accounts, no network, no extra packages.
+
+Runtime load collection reads `/proc/loadavg` and
+`/sys/devices/system/cpu/online` directly without launching a polling process.
 
 ## Why
 

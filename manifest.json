@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "esegnorelli.omacapy",
+  "id": "io.github.ol4vr.omacapy",
   "name": "OmaCapy",
-  "version": "2.5.1",
-  "author": "Esegnorelli",
+  "version": "3.0.0",
+  "author": "Olav Rorvik",
   "license": "MIT",
-  "description": "A bar companion for Omarchy. Moods, snacks, and zen that follow your CPU load — same shell, same theme.",
+  "description": "An Omarchy+ bar companion with moods, snacks, and zen driven by normalized system load.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "OmaCapy",
-    "description": "Bar companion with moods, snacks, and zen that follow CPU load.",
+    "description": "Bar companion with moods, snacks, and zen that follow normalized system load.",
     "category": "Widgets",
     "allowMultiple": false,
     "defaultSection": "center"

@@ -100,13 +100,40 @@ function parseLoad(raw) {
   return isFinite(n) ? n : 0
 }
 
+function parseCpuCount(raw) {
+  var text = String(raw || "").trim()
+  if (!text) return 1
+  var count = 0
+  var groups = text.split(",")
+  for (var i = 0; i < groups.length; i++) {
+    var match = groups[i].trim().match(/^(\d+)(?:-(\d+))?$/)
+    if (!match) continue
+    var first = Number(match[1])
+    var last = match[2] == null ? first : Number(match[2])
+    if (isFinite(first) && isFinite(last) && last >= first)
+      count += last - first + 1
+  }
+  return Math.max(1, count)
+}
+
+function normalizeLoad(load, cpuCount) {
+  var raw = Number(load)
+  var cpus = Math.max(1, Math.floor(Number(cpuCount) || 1))
+  if (!isFinite(raw) || raw < 0) raw = 0
+  return raw / cpus
+}
+
+function loadPercent(loadRatio) {
+  return Math.round(clamp(Number(loadRatio) * 100, 0, 999))
+}
+
 function deriveMood(state, load, ts) {
   ts = ts || nowMs()
   var hour = hourLocal(ts)
   var lonelyMs = ts - (state.lastInteractMs || ts)
   var since = ts - (state.lastActionMs || 0)
   var act = String(state.lastAction || "")
-  if (load >= 4.5 || state.zen < 20) return "fried"
+  if (load >= 1.125 || state.zen < 20) return "fried"
   if (lonelyMs > 6 * 60 * 60 * 1000 && state.happiness < 45) return "lonely"
   if ((hour >= 23 || hour < 6) && state.happiness > 35) return "napping"
   if (act === "soak" && since < 150000) return "soaked"
@@ -131,8 +158,8 @@ function tick(state, load, ts) {
   state.happiness = clamp(state.happiness - dtMin * 0.18, 0, 100)
   state.zen = clamp(state.zen - dtMin * 0.12, 0, 100)
 
-  if (load >= 2.5) state.zen = clamp(state.zen - dtMin * (0.4 + load * 0.08), 0, 100)
-  else if (load < 0.8) state.zen = clamp(state.zen + dtMin * 0.25, 0, 100)
+  if (load >= 0.625) state.zen = clamp(state.zen - dtMin * (0.4 + load * 0.32), 0, 100)
+  else if (load < 0.2) state.zen = clamp(state.zen + dtMin * 0.25, 0, 100)
 
   var hour = hourLocal(ts)
   if (hour >= 23 || hour < 6) state.zen = clamp(state.zen + dtMin * 0.5, 0, 100)
@@ -349,10 +376,10 @@ function bondRank(bond) {
   return "visitor"
 }
 
-function tooltip(state, load) {
+function tooltip(state, loadRatio) {
   var m = moodMeta(state && state.mood)
-  var loadText = isFinite(load) ? load.toFixed(2) : "?"
-  return "OmaCapy · " + m.title + " · CPU " + loadText + " · click for lounge"
+  var loadText = isFinite(loadRatio) ? loadPercent(loadRatio) + "%" : "?"
+  return "OmaCapy · " + m.title + " · system load " + loadText + " · click for lounge"
 }
 
 function meter(label, value) {
@@ -418,20 +445,6 @@ function textKeyAction(text) {
   return ""
 }
 
-function normalizeSide(side) {
-  var s = String(side || "").toLowerCase()
-  if (s === "left" || s === "center" || s === "right") return s
-  return "center"
-}
-
-function sideOptions() {
-  return [
-    { value: "left", label: "Left" },
-    { value: "center", label: "Center" },
-    { value: "right", label: "Right" },
-  ]
-}
-
 function actionFx(actionId) {
   if (actionId === "pet") return ["💕", "✨", "🫶", "💫"]
   if (actionId === "orange") return ["🍊", "✨", "🟡", "😋"]
@@ -449,7 +462,7 @@ function loungeHint() {
 }
 
 function meterHint() {
-  return "They fade slowly. Night restores zen. High CPU load fries it."
+  return "They fade slowly. Night restores zen. High normalized system load fries it."
 }
 
 function emptyWisdom() {
@@ -464,6 +477,9 @@ if (typeof module !== "undefined") {
     parseState: parseState,
     serializeState: serializeState,
     parseLoad: parseLoad,
+    parseCpuCount: parseCpuCount,
+    normalizeLoad: normalizeLoad,
+    loadPercent: loadPercent,
     deriveMood: deriveMood,
     tick: tick,
     pet: pet,
@@ -483,8 +499,6 @@ if (typeof module !== "undefined") {
     actionTooltip: actionTooltip,
     lastActionLine: lastActionLine,
     textKeyAction: textKeyAction,
-    normalizeSide: normalizeSide,
-    sideOptions: sideOptions,
     actionFx: actionFx,
     shortcutHint: shortcutHint,
     loungeHint: loungeHint,

@@ -25,6 +25,12 @@ assert("empty parse", M.parseState("", t0).version === 4)
 assert("bad json", M.parseState("{", t0).happiness === 72)
 assert("loadavg", M.parseLoad("1.25 0.80 0.40 1/234 99") === 1.25)
 assert("load empty", M.parseLoad("") === 0)
+assert("cpu range", M.parseCpuCount("0-31") === 32)
+assert("cpu groups", M.parseCpuCount("0-3,8,10-11") === 7)
+assert("cpu fallback", M.parseCpuCount("nope") === 1)
+assert("four cpu parity", M.normalizeLoad(4.5, 4) === 1.125)
+assert("hugin moderate load", M.normalizeLoad(16, 32) === 0.5)
+assert("load percent", M.loadPercent(1.125) === 113)
 
 var v1 = M.parseState(JSON.stringify({
   version: 1,
@@ -49,9 +55,13 @@ s = M.tick(idle, 0.2, t0 + 10 * 60 * 1000)
 assert("decays belly", s.belly < 58 && s.belly > 50)
 assert("decays happiness", s.happiness < 72 && s.happiness > 68)
 
-var hot = M.tick(Object.assign(M.defaultState(t0), { zen: 50, lastTickMs: t0 }), 5, t0 + 20 * 60 * 1000)
+var hot = M.tick(Object.assign(M.defaultState(t0), { zen: 50, lastTickMs: t0 }), 1.25, t0 + 20 * 60 * 1000)
 assert("load cooks zen", hot.zen < 50)
-assert("fried from load", M.deriveMood(Object.assign(M.defaultState(t0), { zen: 50 }), 5, t0) === "fried")
+assert("fried from load", M.deriveMood(Object.assign(M.defaultState(t0), { zen: 50 }), 1.125, t0) === "fried")
+assert("hugin moderate load stays chill",
+  M.deriveMood(Object.assign(M.defaultState(t0), { zen: 50 }), M.normalizeLoad(16, 32), t0) === "chill")
+assert("hugin saturated load fries",
+  M.deriveMood(Object.assign(M.defaultState(t0), { zen: 50 }), M.normalizeLoad(36, 32), t0) === "fried")
 assert("fried from zen", M.deriveMood(Object.assign(M.defaultState(t0), { zen: 10 }), 0.1, t0) === "fried")
 
 var lonely = Object.assign(M.defaultState(t0), { happiness: 30, lastInteractMs: t0 - 7 * 60 * 60 * 1000 })
@@ -107,11 +117,8 @@ assert("toast not persisted", JSON.parse(M.serializeState(p)).toast == null)
 assert("portrait soaked", M.portraitFor("soaked") === "capy-soaked.png")
 assert("portrait chill", M.portraitFor("chill") === "capy.png")
 assert("four actions", M.actions().map(function(a) { return a.id }).join(",") === "pet,orange,soak,wisdom")
-assert("side default", M.normalizeSide("") === "center" && M.normalizeSide("nope") === "center")
-assert("side left", M.normalizeSide("Left") === "left")
-assert("three sides", M.sideOptions().length === 3 && M.sideOptions()[1].value === "center")
 assert("bar word", M.moodMeta("chill").bar === "Capy")
-assert("tooltip", M.tooltip(idle, 1.5).indexOf("OmaCapy") === 0)
+assert("tooltip", M.tooltip(idle, 0.375).indexOf("system load 38%") !== -1)
 
 assert("action count pets", M.actionCount(p, "pet") === 1 && M.actionCount(p, "orange") === 0)
 assert("button label with count", M.actionButtonLabel(p, M.actions()[0]) === "Pet  ·  1")

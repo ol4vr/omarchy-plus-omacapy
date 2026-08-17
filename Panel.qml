@@ -7,8 +7,8 @@ import "Model.js" as Model
 
 Panel {
   id: root
-  moduleName: "esegnorelli.omacapy"
-  ipcTarget: "esegnorelli.omacapy"
+  moduleName: "io.github.ol4vr.omacapy"
+  ipcTarget: "io.github.ol4vr.omacapy"
 
   readonly property string home: Quickshell.env("HOME") || ""
   readonly property string stateHome: Quickshell.env("XDG_STATE_HOME") || (home + "/.local/state")
@@ -17,6 +17,8 @@ Panel {
 
   property var capy: Model.defaultState(Date.now())
   property real loadAvg: 0
+  property real loadRatio: 0
+  property int logicalCpuCount: 1
   property bool hydrateDone: false
   property int cursorIndex: 0
   property bool cursorActive: false
@@ -42,55 +44,28 @@ Panel {
   readonly property color moodColor: capy.mood === "fried"
     ? (bar ? bar.urgent : Color.urgent)
     : Color.accent
-  readonly property string panelSide: Model.normalizeSide(setting("panelSide", "center"))
-  readonly property var sides: Model.sideOptions()
-
   function persist() {
     if (!hydrateDone) return
     stateFile.setText(Model.serializeState(capy))
   }
 
-  function persistSettings(values) {
-    var entry = { id: root.moduleName }
-    var existing
-    for (existing in root.settings) if (existing !== "id") entry[existing] = root.settings[existing]
-    for (existing in values) entry[existing] = values[existing]
-    root.settings = entry
-    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
-      root.bar.shell.updateEntryInline(root.moduleName, entry)
-  }
-
-  function moveToSide(side) {
-    var payload = JSON.stringify({ section: side })
-    if (root.bar && root.bar.shell && root.bar.shell.pluginRegistry
-        && typeof root.bar.shell.pluginRegistry.moveBarWidget === "function") {
-      root.bar.shell.pluginRegistry.moveBarWidget(root.moduleName, { section: side })
-      return
-    }
-    if (!moveProc.running) {
-      moveProc.command = ["omarchy-shell", "shell", "moveBarWidget", root.moduleName, payload]
-      moveProc.running = true
-    }
-  }
-
-  function setSide(side) {
-    side = Model.normalizeSide(side)
-    if (side === root.panelSide) return
-    persistSettings({ panelSide: side })
-    moveToSide(side)
+  function applyCpuOnline(raw) {
+    logicalCpuCount = Model.parseCpuCount(raw)
+    loadRatio = Model.normalizeLoad(loadAvg, logicalCpuCount)
   }
 
   function applyLoad(raw) {
     loadAvg = Model.parseLoad(raw)
+    loadRatio = Model.normalizeLoad(loadAvg, logicalCpuCount)
   }
 
   function refreshLoad() {
-    if (!loadProc.running)
-      loadProc.running = true
+    cpuOnlineFile.reload()
+    loadFile.reload()
   }
 
   function runTick() {
-    capy = Model.tick(capy, loadAvg, Date.now())
+    capy = Model.tick(capy, loadRatio, Date.now())
     if (hydrateDone) persist()
   }
 
@@ -156,10 +131,10 @@ Panel {
 
   function doAction(id) {
     var ts = Date.now()
-    if (id === "pet") capy = Model.pet(capy, loadAvg, ts)
-    else if (id === "orange") capy = Model.orange(capy, loadAvg, ts)
-    else if (id === "soak") capy = Model.soak(capy, loadAvg, ts)
-    else if (id === "wisdom") capy = Model.wisdom(capy, loadAvg, ts)
+    if (id === "pet") capy = Model.pet(capy, loadRatio, ts)
+    else if (id === "orange") capy = Model.orange(capy, loadRatio, ts)
+    else if (id === "soak") capy = Model.soak(capy, loadRatio, ts)
+    else if (id === "wisdom") capy = Model.wisdom(capy, loadRatio, ts)
     else return
     persist()
     if (id === "wisdom") flashWisdom(capy.lastWisdom || "")
@@ -232,18 +207,20 @@ Panel {
     onExited: Qt.callLater(function() { stateFile.reload() })
   }
 
-  Process {
-    id: moveProc
-    command: ["omarchy-shell", "shell", "moveBarWidget", root.moduleName, "{\"section\":\"center\"}"]
+  FileView {
+    id: cpuOnlineFile
+    path: "/sys/devices/system/cpu/online"
+    watchChanges: false
+    printErrors: false
+    onLoaded: root.applyCpuOnline(text())
   }
 
-  Process {
-    id: loadProc
-    command: ["cat", "/proc/loadavg"]
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: root.applyLoad(text)
-    }
+  FileView {
+    id: loadFile
+    path: "/proc/loadavg"
+    watchChanges: false
+    printErrors: false
+    onLoaded: root.applyLoad(text())
   }
 
   FileView {
@@ -328,7 +305,7 @@ Panel {
     fixedWidth: root.bar && root.bar.vertical ? -1 : Style.space(58)
     fixedHeight: root.bar && root.bar.vertical ? Style.space(36) : -1
     horizontalMargin: 6
-    tooltipText: Model.tooltip(root.capy, root.loadAvg)
+    tooltipText: Model.tooltip(root.capy, root.loadRatio)
     onPressed: function(b) {
       if (b === Qt.MiddleButton) {
         root.doAction("pet")
@@ -372,7 +349,7 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    centerOnBar: root.panelSide === "center"
+    centerOnBar: true
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(360))
     contentHeight: panel.fittedContentHeight(column.implicitHeight)
@@ -489,7 +466,7 @@ Panel {
 
               Text {
                 width: parent.width
-                text: root.rank + "  ·  CPU " + root.loadAvg.toFixed(2)
+                text: root.rank + "  ·  LOAD " + Model.loadPercent(root.loadRatio) + "%"
                   + (Model.lastActionLine(root.capy) !== "" ? "  ·  " + Model.lastActionLine(root.capy) : "")
                 color: root.dim
                 elide: Text.ElideRight
@@ -610,27 +587,6 @@ Panel {
             }
           }
 
-          Row {
-            width: parent.width
-            height: Style.space(30)
-            spacing: Style.space(6)
-
-            Repeater {
-              model: root.sides
-              delegate: Button {
-                required property var modelData
-                width: (parent.width - Style.space(12)) / 3
-                height: parent.height
-                text: modelData.label
-                bordered: true
-                selected: root.panelSide === modelData.value
-                foreground: root.fg
-                fontFamily: root.fontFamily
-                fontSize: Style.font.bodySmall
-                onClicked: root.setSide(modelData.value)
-              }
-            }
-          }
         }
       }
     }
