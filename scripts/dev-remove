@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+expected_repo=/home/ol4vr/Projects/omarchy-plus-apps/omacapy
+plugin_id=io.github.ol4vr.omacapy
+plugin_root=/home/ol4vr/.config/omarchy/plugins
+target="$plugin_root/$plugin_id"
+mode=${1:-remove}
+
+case "$mode" in
+  remove|--check) ;;
+  *)
+    echo "Usage: $0 [--check]" >&2
+    exit 2
+    ;;
+esac
+
+if [[ "$repo" != "$expected_repo" ]]; then
+  echo "Refusing unexpected source path: $repo" >&2
+  exit 1
+fi
+if [[ "$target" != "$plugin_root/$plugin_id" ]]; then
+  echo "Refusing unexpected target path: $target" >&2
+  exit 1
+fi
+
+if [[ ! -e "$target" ]]; then
+  echo "No OmaCapy development copy is present."
+  [[ "$mode" == --check ]] && echo "OmaCapy development removal check: PASS"
+  exit 0
+fi
+if [[ ! -d "$target" ]]; then
+  echo "Refusing non-directory plugin target: $target" >&2
+  exit 1
+fi
+if [[ -e "$target/.git" ]]; then
+  echo "Refusing to remove Git-managed production checkout: $target" >&2
+  exit 1
+fi
+if [[ ! -f "$target/.omarchy-plus-development" ]]; then
+  echo "Refusing unrecognized plugin directory: $target" >&2
+  exit 1
+fi
+
+expected_marker=$(mktemp /tmp/omarchy-plus-omacapy-marker.XXXXXX)
+trap 'rm -f -- "$expected_marker"' EXIT
+printf '%s\n' \
+  'schema=1' \
+  "id=$plugin_id" \
+  "source=$expected_repo" > "$expected_marker"
+
+if ! cmp -s "$expected_marker" "$target/.omarchy-plus-development"; then
+  echo "Refusing development directory with a foreign marker: $target" >&2
+  exit 1
+fi
+
+if [[ "$mode" == --check ]]; then
+  echo "OmaCapy development removal check: PASS"
+  echo "Recognized removable target: $target"
+  exit 0
+fi
+
+rm -rf -- "$target"
+omarchy-shell shell rescanPlugins
+
+echo "Removed OmaCapy development copy: $target"
+echo "The application source repository was not changed."
+
+shell_config=/home/ol4vr/.config/omarchy/shell.json
+if [[ -f "$shell_config" ]] && jq -e --arg id "$plugin_id" \
+  '.. | objects | select(.id? == $id)' "$shell_config" >/dev/null 2>&1; then
+  echo "The application ID remains in $shell_config; review enablement separately."
+else
+  echo "No remaining application entry was found in $shell_config."
+fi

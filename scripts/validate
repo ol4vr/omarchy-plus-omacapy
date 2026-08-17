@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+expected_id=io.github.ol4vr.omacapy
+runtime_list="$repo/runtime-files.txt"
+omarchy_path=${OMARCHY_PATH:-/home/ol4vr/.local/share/omarchy}
+
+python3 - "$repo" "$expected_id" "$runtime_list" <<'PY'
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path, PurePosixPath
+
+
+root = Path(sys.argv[1]).resolve()
+expected_id = sys.argv[2]
+runtime_list = Path(sys.argv[3])
+
+manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+required = ("schemaVersion", "id", "name", "version", "license", "kinds", "entryPoints")
+missing = [key for key in required if key not in manifest]
+if missing:
+    raise RuntimeError(f"manifest keys missing: {', '.join(missing)}")
+if manifest["schemaVersion"] != 1:
+    raise RuntimeError("manifest schemaVersion must be 1")
+if manifest["id"] != expected_id:
+    raise RuntimeError(f"manifest ID must be {expected_id}")
+if manifest["version"] != "3.0.0":
+    raise RuntimeError("owned foundation version must be 3.0.0")
+if manifest["kinds"] != ["bar-widget"]:
+    raise RuntimeError("OmaCapy must declare only bar-widget")
+
+entry = manifest["entryPoints"].get("barWidget")
+if entry != "Panel.qml":
+    raise RuntimeError("unexpected bar-widget entry point")
+entry_path = PurePosixPath(entry)
+if entry_path.is_absolute() or ".." in entry_path.parts:
+    raise RuntimeError("unsafe manifest entry point")
+if not (root / entry).is_file():
+    raise RuntimeError("manifest entry point does not exist")
+
+panel = (root / "Panel.qml").read_text(encoding="utf-8")
+for line in (f'moduleName: "{expected_id}"', f'ipcTarget: "{expected_id}"'):
+    if panel.count(line) != 1:
+        raise RuntimeError(f"Panel.qml identity line must occur exactly once: {line}")
+
+for forbidden in ("moveBarWidget", "moveProc", "panelSide", "sideOptions", "setSide", "moveToSide"):
+    if forbidden in panel or forbidden in (root / "Model.js").read_text(encoding="utf-8"):
+        raise RuntimeError(f"plugin-local placement authority remains: {forbidden}")
+
+symlinks = []
+for path in root.rglob("*"):
+    relative = path.relative_to(root)
+    if relative.parts and relative.parts[0] == ".git":
+        continue
+    if path.is_symlink():
+        symlinks.append(str(relative))
+if symlinks:
+    raise RuntimeError(f"repository payload contains symlinks: {symlinks}")
+
+runtime_paths = []
+for line in runtime_list.read_text(encoding="utf-8").splitlines():
+    value = line.strip()
+    if not value:
+        continue
+    candidate = PurePosixPath(value)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise RuntimeError(f"unsafe runtime path: {value}")
+    if value in runtime_paths:
+        raise RuntimeError(f"duplicate runtime path: {value}")
+    path = root / value
+    if not path.is_file() or path.is_symlink():
+        raise RuntimeError(f"runtime file is missing or unsafe: {value}")
+    runtime_paths.append(value)
+
+required_runtime = (
+    "manifest.json", "Panel.qml", "Model.js", "CapyFace.qml", "LICENSE", "README.md",
+    "capy.png", "capy-munching.png", "capy-napping.png", "capy-soaked.png",
+)
+for required_path in required_runtime:
+    if required_path not in runtime_paths:
+        raise RuntimeError(f"required runtime file is not allowlisted: {required_path}")
+PY
+
+omarchy plugin validate "$repo"
+qmllint -I "$omarchy_path/shell" "$repo/Panel.qml" "$repo/CapyFace.qml"
+node "$repo/test-model.js"
+grep -Fq 'interval: 15000' "$repo/Panel.qml"
+grep -Fq 'path: "/proc/loadavg"' "$repo/Panel.qml"
+grep -Fq 'path: "/sys/devices/system/cpu/online"' "$repo/Panel.qml"
+grep -Fq 'M.normalizeLoad(16, 32)' "$repo/test-model.js"
+grep -Fq 'omarchy restart shell' "$repo/scripts/dev-deploy"
+if rg -n 'command: \["cat", "/proc/loadavg"\]|moveBarWidget|panelSide|sideOptions' \
+    "$repo/Panel.qml" "$repo/Model.js" "$repo/test-model.js"; then
+  echo "Forbidden process or placement authority remains." >&2
+  exit 1
+fi
+bash -n "$repo/scripts/validate" "$repo/scripts/dev-deploy" "$repo/scripts/dev-remove"
+
+if git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git -C "$repo" diff --check
+fi
+
+echo "OmaCapy validation: PASS"

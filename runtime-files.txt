@@ -1,0 +1,10 @@
+manifest.json
+Panel.qml
+Model.js
+CapyFace.qml
+capy.png
+capy-munching.png
+capy-napping.png
+capy-soaked.png
+LICENSE
+README.md

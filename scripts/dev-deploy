@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+expected_repo=/home/ol4vr/Projects/omarchy-plus-apps/omacapy
+plugin_id=io.github.ol4vr.omacapy
+plugin_root=/home/ol4vr/.config/omarchy/plugins
+target="$plugin_root/$plugin_id"
+runtime_list="$repo/runtime-files.txt"
+omarchy_path=${OMARCHY_PATH:-/home/ol4vr/.local/share/omarchy}
+mode=${1:-deploy}
+
+case "$mode" in
+  deploy|--check) ;;
+  *)
+    echo "Usage: $0 [--check]" >&2
+    exit 2
+    ;;
+esac
+
+if [[ "$repo" != "$expected_repo" ]]; then
+  echo "Refusing unexpected source path: $repo" >&2
+  exit 1
+fi
+
+branch=$(git -C "$repo" branch --show-current)
+if [[ -z "$branch" || "$branch" == main || "$branch" == master ]]; then
+  echo "Refusing deployment from non-development branch: ${branch:-detached}" >&2
+  exit 1
+fi
+
+"$repo/scripts/validate"
+
+marker_text=$(mktemp /tmp/omarchy-plus-omacapy-marker.XXXXXX)
+stage=
+
+cleanup() {
+  if [[ -n "$stage" && -d "$stage" ]]; then
+    rm -rf -- "$stage"
+  fi
+  rm -f -- "$marker_text"
+}
+trap cleanup EXIT
+
+printf '%s\n' \
+  'schema=1' \
+  "id=$plugin_id" \
+  "source=$expected_repo" > "$marker_text"
+
+if [[ -e "$target" ]]; then
+  if [[ ! -d "$target" ]]; then
+    echo "Refusing non-directory plugin target: $target" >&2
+    exit 1
+  fi
+  if [[ -e "$target/.git" ]]; then
+    echo "Refusing to replace Git-managed production checkout: $target" >&2
+    exit 1
+  fi
+  if [[ ! -f "$target/.omarchy-plus-development" ]]; then
+    echo "Refusing unrecognized plugin directory: $target" >&2
+    exit 1
+  fi
+  if ! cmp -s "$marker_text" "$target/.omarchy-plus-development"; then
+    echo "Refusing development directory with a foreign marker: $target" >&2
+    exit 1
+  fi
+fi
+
+if [[ "$mode" == --check ]]; then
+  stage=$(mktemp -d /tmp/omarchy-plus-omacapy-stage.XXXXXX)
+else
+  mkdir -p "$plugin_root"
+  stage=$(mktemp -d "$plugin_root/.omacapy-stage.XXXXXX")
+fi
+
+while IFS= read -r relative; do
+  [[ -n "$relative" ]] || continue
+  install -D -m 0644 "$repo/$relative" "$stage/$relative"
+done < "$runtime_list"
+
+install -m 0644 "$marker_text" "$stage/.omarchy-plus-development"
+
+omarchy plugin validate "$stage"
+qmllint -I "$omarchy_path/shell" "$stage/Panel.qml" "$stage/CapyFace.qml"
+
+if [[ "$mode" == --check ]]; then
+  echo "OmaCapy development deployment check: PASS"
+  echo "No live configuration changed."
+  exit 0
+fi
+
+backup=
+if [[ -d "$target" ]]; then
+  backup="$plugin_root/.omacapy-previous.$$"
+  if [[ -e "$backup" ]]; then
+    echo "Refusing unexpected backup path: $backup" >&2
+    exit 1
+  fi
+  mv -- "$target" "$backup"
+fi
+
+if ! mv -- "$stage" "$target"; then
+  if [[ -n "$backup" && -d "$backup" ]]; then
+    mv -- "$backup" "$target"
+  fi
+  echo "Development deployment failed; previous copy restored." >&2
+  exit 1
+fi
+stage=
+
+if [[ -n "$backup" && -d "$backup" ]]; then
+  rm -rf -- "$backup"
+fi
+
+# Quattro currently rescans changed plugins without evicting their QML
+# component cache. A full shell restart safely loads the new runtime payload.
+omarchy restart shell
+
+echo "OmaCapy development copy deployed and shell restarted."
+echo "Source:  $repo"
+echo "Target:  $target"
+echo "Branch:  $branch"
+echo
+echo "Enable manually:"
+echo "  omarchy plugin enable $plugin_id"
+echo "Inspect:"
+echo "  omarchy plugin list --json | jq --arg id '$plugin_id' '.[] | select(.id == \$id)'"
+echo "Remove development copy:"
+echo "  $repo/scripts/dev-remove"
